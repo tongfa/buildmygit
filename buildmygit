@@ -1,0 +1,80 @@
+#!/bin/bash
+# Copyright Chris David, 2017
+# See LICENSE.txt
+
+BMG_BUILD_CMD=${BMG_BUILD_CMD:-"echo no build command defined"}
+BMG_HYSTERESIS_TIME=0.1
+
+set -e
+
+# xtra debuggin
+#set -x
+
+BMG__TMP_FOLDER=$(mktemp -d)
+
+bmg__build() {
+    while [ -e ${BMG__TMP_FOLDER}/.bmg__kick_build ] ; do
+        echo running build
+        rm ${BMG__TMP_FOLDER}/.bmg__kick_build
+	${BMG_BUILD_CMD} ${BMG__ROOTDIR}
+    done
+}
+
+bmg__loop() {
+    while ${BMG__RUNNING}; do
+        # if the .bmg__kick_build was touched
+	echo in loop
+        if ( inotifywait -e close_write ${BMG__TMP_FOLDER}/ | grep 'CLOSE_WRITE,CLOSE .bmg__kick_build' ) ; then
+            # do the build
+            bmg__build
+        fi
+    done
+}
+
+bmg__clean_up() {
+    BMG__RUNNING=/bin/false
+    rm -rf ${BMG__TMP_FOLDER}
+}
+
+bmg__kick_build() {
+    if [ "${BMG__KICK_HYSTERESIS_PID}" ] && kill -0 ${BMG__KICK_HYSTERESIS_PID} ; then
+	echo kill  ${BMG__KICK_HYSTERESIS_PID}
+	kill ${BMG__KICK_HYSTERESIS_PID}
+    fi
+    (sleep ${BMG_HYSTERESIS_TIME} && touch ${BMG__TMP_FOLDER}/.bmg__kick_build ) &
+    BMG__KICK_HYSTERESIS_PID=$!
+}
+
+bmg__git_ignored() {
+    git check-ignore "$1" || true
+}
+
+bmg__watch_for_changes() {
+    while ${BMG__RUNNING}; do
+	CHANGE=$(inotifywait -e close_write ${BMG__ROOTDIR}/ | awk -e '{print $3}')
+        if [ "${CHANGE}" != .bmg__kick_build  ] ; then
+	    IGNORED=$(bmg__git_ignored "${CHANGE}")
+	    if [ ! "${IGNORED}" ] ; then
+		# do the build
+		echo detected change: ${CHANGE}
+		bmg__kick_build
+	    fi
+        fi
+    done
+}
+
+bmg__main() {
+    BMG__ROOTDIR=$(cd "${1}" && pwd)
+    echo using ${BMG__TMP_FOLDER}/.bmg__kick_build
+    ( bmg__loop ) &
+    BMG__LOOPPID=$!
+    BMG__RUNNING=/bin/true
+    bmg__watch_for_changes
+    wait ${BMG__LOOPPID}
+}
+
+trap bmg__clean_up SIGINT SIGTERM
+trap bmg__kick_build SIGHUP
+
+bmg__main ${@}
+
