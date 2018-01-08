@@ -1,6 +1,10 @@
+# description
+
+A bash script which detects changes in source controlled by git and then runs a build command.
+
 # requirements
 
-This script is only intended to run on linux in bash.  Linux is the only OS with inotify, and unfortuntely other popular OS's don't have it available.
+This script is only intended to run under linux.  It uses inotify.  Linux is the only OS with inotify, and unfortuntely other popular OS's don't have it available.
 
 ## Debian / Ubuntu
 `sudo apt-get install inotify-tools`
@@ -11,7 +15,7 @@ You'll also need a kernel that has inotify built in.
 
 ## other dependencies
 
-This tool is not quite pure bash.  It also depends on `awk`, `grep`, `/bin/true`, `/bin/false`, `git`.  If you have a use for this script in the first place, I think odds are you'll have those dependencies already installed.
+This tool is not quite pure bash.  It also depends on `awk`, `grep`, `/bin/true`, `/bin/false`, `git`.  If you are already building your project under linux, odds are you'll have those dependencies already installed.
 
 # usage
 
@@ -33,7 +37,9 @@ BMG_BUILD_CMD=build_my_stuff
 
 The hysteresis is a time to wait for more file changes before starting a build.  For example this would allow a git checkout of a new branch that changes many files at once to only cause a single build.  It is defined as the input to the `sleep` command, which is seconds.  It's default is 0.1 (100 ms).  I imagine increasing it may be necessary if your project is complex.
 
-The environment variables can be defined in your `.bashrc` or `.profile`.  Or you can put then in a standalone file (i.e. `myProjectSettings`) and use a command like `source myProjectSettings` to set them just for the current shell.
+There many ways to define these environment variables, I would suggest one of these two options:
+1) in a local file in your git repo.  A toplevel file `.bmg` in your git repo will be sourced by this script on each invocation if it exists.
+2) In environment variables defined in your `.bashrc` or `.profile`.
 
 ## running
 
