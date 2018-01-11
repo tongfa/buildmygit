@@ -1,47 +1,65 @@
 #!/bin/bash
-# Copyright Chris David, 2017
+# Copyright Chris David, 2017, 2018
 # See LICENSE.txt
 
+# ${:-} provides for default when not defined externally
 BMG_BUILD_CMD=${BMG_BUILD_CMD:-"echo no build command defined"}
-BMG_HYSTERESIS_TIME=0.1
+BMG_HYSTERESIS_TIME=${BMG_HYSTERESIS_TIME:-"0.1"}
 
 set -e
 
 # xtra debuggin
 #set -x
 
-BMG__TMP_FOLDER=$(mktemp -d)
+bmg__trace() {
+    echo -n
+#    echo "$@"
+}
 
 bmg__build() {
     while [ -e ${BMG__TMP_FOLDER}/.bmg__kick_build ] ; do
-        echo running build
+        bmg__trace running build
         rm ${BMG__TMP_FOLDER}/.bmg__kick_build
         ${BMG_BUILD_CMD} ${BMG__ROOTDIR} || true
     done
 }
 
 bmg__loop() {
-    while ${BMG__RUNNING}; do
+    bmg__trace loop start
+    while [ -e ${BMG__TMP_FOLDER}/.bmg__running ] ; do
         # if the .bmg__kick_build was touched
-        echo in loop
-        if ( inotifywait -e close_write ${BMG__TMP_FOLDER}/ | grep 'CLOSE_WRITE,CLOSE .bmg__kick_build' ) ; then
+        bmg__trace in loop
+        bmg__trace ${BMG__DETECT_KICK}
+        CHANGE=$(${BMG__DETECT_KICK})
+        if [ "${CHANGE}" ]; then
+            bmg__trace 'received kick'
             # do the build
             bmg__build
+        else
+            bmg__trace 'ignoring kick'
         fi
+        # sleep gives time for this loop to detect removal of .bmg__running
+        sleep 0.1
+        bmg__trace looping
     done
+    bmg__trace loop done
 }
 
 bmg__clean_up() {
-    BMG__RUNNING=/bin/false
-    rm -rf ${BMG__TMP_FOLDER}
+    bmg__trace clean up
+    [ -e {BMG__TMP_FOLDER}/.bmg__kick_build ] && rm ${BMG__TMP_FOLDER}/.bmg__kick_build
+    rm ${BMG__TMP_FOLDER}/.bmg__running
+    bmg__trace deleted
+    kill -s SIGINT ${BMG__LOOPPID}
 }
 
 bmg__kick_build() {
     if [ "${BMG__KICK_HYSTERESIS_PID}" ] && kill -0 ${BMG__KICK_HYSTERESIS_PID} >> /dev/null; then
-        echo kill  ${BMG__KICK_HYSTERESIS_PID}
+        bmg__trace kill  ${BMG__KICK_HYSTERESIS_PID}
         kill ${BMG__KICK_HYSTERESIS_PID}
     fi
-    (sleep ${BMG_HYSTERESIS_TIME} && touch ${BMG__TMP_FOLDER}/.bmg__kick_build ) &
+    bmg__trace scheduling kick
+    (sleep ${BMG_HYSTERESIS_TIME} && bmg__trace touch ${BMG__TMP_FOLDER}/.bmg__kick_build && touch ${BMG__TMP_FOLDER}/.bmg__kick_build ) &
     BMG__KICK_HYSTERESIS_PID=$!
 }
 
@@ -50,28 +68,48 @@ bmg__git_ignored() {
 }
 
 bmg__watch_for_changes() {
-    while ${BMG__RUNNING}; do
-              CHANGE=$(inotifywait -r -e close_write ${BMG__ROOTDIR}/ | awk -e '{print $3}')
-        if [ "${CHANGE}" -a "${CHANGE}" != .bmg__kick_build  ] ; then
+    while [ -e ${BMG__TMP_FOLDER}/.bmg__running ] ; do
+        CHANGE=$(${BMG__DETECT_CHANGE})
+        if [ "${CHANGE}" -a "${CHANGE}" != ${BMG__TMP_FOLDER}/.bmg__kick_build  ] ; then
             IGNORED=$(bmg__git_ignored "${CHANGE}")
             if [ ! "${IGNORED}" ] ; then
                 # do the build
                 echo detected change: ${CHANGE}
                 bmg__kick_build
+            else
+                bmg__trace ignoring change: ${CHANGE}
             fi
         fi
     done
 }
 
+bmg__detect_inotify_or_fswatch() {
+    if [ "$(which inotifywait)" ] ; then
+        echo "using $(which inotifywait)"
+        BMG__DETECT_CHANGE="$(which inotifywait) -r -e close_write ${BMG__ROOTDIR}/ | awk -e '{print \$3}'"
+        BMG__DETECT_KICK="$(which inotifywait) -e close_write ${BMG__TMP_FOLDER}/ | grep 'CLOSE_WRITE,CLOSE .bmg__kick_build' )"
+    elif [ "$(which fswatch)" ] ; then
+        echo "using $(which fswatch)"
+        BMG__DETECT_CHANGE="$(which fswatch) -r1 ."
+        BMG__DETECT_KICK="$(which fswatch) -1 ${BMG__TMP_FOLDER}/.bmg__kick_build"
+    else
+        echo "ERROR did not detect inotifywait nor fswatch in path"
+        exit 1
+    fi
+}
+
 bmg__main() {
     BMG__ROOTDIR=$(cd "${1}" && pwd)
-    echo using ${BMG__TMP_FOLDER}/.bmg__kick_build
+    BMG__TMP_FOLDER="${BMG__ROOTDIR}"
+    bmg__trace using ${BMG__TMP_FOLDER}/.bmg__kick_build
     [ -e "${BMG__ROOTDIR}/.bmg" ] && . "${BMG__ROOTDIR}/.bmg"
+    bmg__detect_inotify_or_fswatch
+    touch ${BMG__TMP_FOLDER}/.bmg__running
     ( bmg__loop ) &
     BMG__LOOPPID=$!
-    BMG__RUNNING=/bin/true
     bmg__watch_for_changes
-    wait ${BMG__LOOPPID}
+    wait
+    bmg__trace done waiting
 }
 
 trap bmg__clean_up SIGINT SIGTERM

@@ -4,7 +4,7 @@ A bash script which detects changes in source controlled by git and then runs a 
 
 # requirements
 
-This script is only intended to run under linux.  It uses inotify.  Linux is the only OS with inotify, and unfortuntely other popular OS's don't have it available.
+This script works with inotifywait or as a fallback fswatch.
 
 ## Debian / Ubuntu
 `sudo apt-get install inotify-tools`
@@ -12,10 +12,16 @@ This script is only intended to run under linux.  It uses inotify.  Linux is the
 ## centos
 I think you will need to build inotify-tools from source.  good luck.
 You'll also need a kernel that has inotify built in.
+Might be easier to install fswatch?
+
+## MacOS
+`brew install fswatch`
+
+`brew install git` if you do not already have it.
 
 ## other dependencies
 
-This tool is not quite pure bash.  It also depends on `awk`, `grep`, `/bin/true`, `/bin/false`, `git`.  If you are already building your project under linux, odds are you'll have those dependencies already installed.
+This tool is not quite pure bash.  It also depends on `awk`, `grep`, `true`, `false` and `git`.  If you are already building your project under linux, odds are you'll have those dependencies already installed. 
 
 # usage
 
